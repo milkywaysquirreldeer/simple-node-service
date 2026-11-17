@@ -1,0 +1,51 @@
+name: Docker Image CI
+
+on:
+  push:
+    paths-ignore:
+      - .gitignore
+      - README.md
+      - LICENSE
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+permissions:
+  contents: read
+  # required for OIDC-based access to provider
+  id-token: write
+
+# Allow one concurrent deployment
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: simple-node-service-env
+
+    steps:
+    - uses: actions/checkout@v7
+    - name: Build the container image
+      run: |
+        docker build -f Containerfile -t localhost/simple-node-service .
+        docker tag localhost/simple-node-service:latest ${{ secrets.ACCOUNT }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/simple-node-service:latest
+
+    - name: Configure AWS credentials
+      if: github.ref == 'refs/heads/main'
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ secrets.OIDC_ROLE_ARN }}
+        role-session-name: GitHub_to_AWS_via_FederatedOIDC
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      if: github.ref == 'refs/heads/main'
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Push the container image
+      if: github.ref == 'refs/heads/main'
+      run: docker push ${{ secrets.ACCOUNT }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/simple-node-service:latest
